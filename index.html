@@ -33,6 +33,12 @@ iframe{width:100%;height:560px;border:1px solid var(--l);border-radius:8px}
 #pa{display:none}
 @media print{body{background:#fff}header,main,.noprint{display:none!important}#pa{display:block;padding:10mm;color:#000}
 #pa table{font-size:12px}#pa th{background:#eee!important}.pg{page-break-after:always}}
+.sp{display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+button:disabled{opacity:.7;cursor:wait}
+#toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,20px);background:#26302b;color:#fff;padding:10px 18px;border-radius:24px;box-shadow:0 4px 14px #0004;opacity:0;pointer-events:none;transition:.2s;z-index:99;font-size:14px;max-width:90vw}
+#toast.show{opacity:1;transform:translate(-50%,0)}#toast.ok{background:var(--g2)}#toast.err{background:#a63d2f}
+@media print{#toast{display:none!important}}
 </style>
 </head>
 <body>
@@ -43,6 +49,7 @@ iframe{width:100%;height:560px;border:1px solid var(--l);border-radius:8px}
 </header>
 <main id="app"></main>
 <div id="pa"></div>
+<div id="toast"></div>
 
 <script>
 /* ===== KONFIGURASI ===== */
@@ -64,14 +71,29 @@ let S={peserta:[],nilai:{},info:{teks:"Selamat datang di pendaftaran FTBI Tingka
 let pw="",isAdmin=false,view="home",atab="data";
 const $=s=>document.querySelector(s), e=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const api=!!CONFIG.API_URL;
+let busyN=0,tt;
+function toast(m,k){const t=$("#toast");clearTimeout(tt);t.className="show "+(k||"");t.innerHTML=(k?"":'<i class="sp"></i>')+e(m);if(k)tt=setTimeout(()=>t.className="",k=="err"?3500:1600)}
+function busyStart(m){busyN++;toast(m)}
+function busyEnd(ok,err){busyN=Math.max(0,busyN-1);if(err)toast(err,"err");else if(!busyN){ok?toast(ok,"ok"):$("#toast").className=""}}
+async function run(btn,label,fn){           // nonaktifkan tombol + tampilkan spinner selama proses
+  if(btn){if(btn.disabled)return;btn._h=btn.innerHTML;btn.disabled=true;btn.innerHTML='<i class="sp"></i>'+label}
+  try{return await fn()}finally{if(btn&&btn.isConnected){btn.disabled=false;btn.innerHTML=btn._h}}
+}
+const WAIT=m=>`<div class="msg"><i class="sp"></i>${m}</div>`;
 const CK="ftbi_cache";
-async function load(){
+async function load(msg){busyStart(msg||"Memuat data…");try{await load_()}finally{busyEnd()}}
+async function load_(){
   try{
     if(api){S=Object.assign(S,await (await fetch(CONFIG.API_URL)).json());try{localStorage.setItem(CK,JSON.stringify(S))}catch(x){}}
     else{const d=localStorage.getItem("ftbi");if(d)S=JSON.parse(d)}
   }catch(x){console.error(x)}
 }
+const MSG={add:"Mengirim pendaftaran…",update:"Menyimpan perubahan…",delete:"Menghapus data…",save:"Menyimpan data…"};
 async function post(action,payload){
+  busyStart(MSG[action]||"Memproses…");
+  try{await post_(action,payload);busyEnd("✔ Berhasil")}catch(x){busyEnd(null,x.message=="Failed to fetch"?"Gagal terhubung ke server":x.message);throw x}
+}
+async function post_(action,payload){
   if(api){
     const r=await (await fetch(CONFIG.API_URL,{method:"POST",body:JSON.stringify({action,pw,...payload})})).json();
     if(r.error)throw new Error(r.error);S=Object.assign(S,r);try{localStorage.setItem(CK,JSON.stringify(S))}catch(x){}return;
@@ -127,17 +149,21 @@ function daftar(){
   <label>Cabang Lomba</label><select name="cabang" required>${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>
   ${F()}
   <div class="row"><button class="btn" id="sb">Daftar</button></div><div id="res"></div></form></div>`;
-  $("#sb").onclick=async()=>{
+  $("#sb").onclick=()=>{
     const f=$("#f");if(!f.reportValidity())return;
     const d=Object.fromEntries(new FormData(f));
-    await load();
-    if(S.peserta.some(p=>p.nisn==d.nisn&&p.cabang==d.cabang)){$("#res").innerHTML=`<div class="msg err">NISN ini sudah terdaftar pada cabang tersebut.</div>`;return}
-    const n=Math.max(0,...S.peserta.filter(p=>p.cabang==d.cabang).map(p=>+String(p.id).split("-")[1]||0))+1;
-    d.id=d.cabang+"-"+String(n).padStart(3,"0");d.ts=new Date().toISOString();
-    try{await post("add",{data:d})}catch(x){$("#res").innerHTML=`<div class="msg err">Gagal: ${e(x.message)}</div>`;return}
-    const real=S.peserta.find(p=>p.nisn==d.nisn&&p.cabang==d.cabang)||d;
-    $("#res").innerHTML=`<div class="msg">Pendaftaran berhasil. No. peserta: <b>${real.id}</b> <button type="button" class="btn o sm" onclick="bukti('${real.id}')">Cetak Bukti</button></div>`;
-    f.reset();
+    run($("#sb"),"Memproses…",async()=>{
+      $("#res").innerHTML=WAIT("Sedang memproses pendaftaran, mohon tunggu dan jangan tutup halaman…");
+      if(!api){                                  // mode demo: cek & nomor dibuat di browser
+        if(S.peserta.some(p=>p.nisn==d.nisn&&p.cabang==d.cabang)){$("#res").innerHTML=`<div class="msg err">NISN ini sudah terdaftar pada cabang tersebut.</div>`;return}
+        const n=Math.max(0,...S.peserta.filter(p=>p.cabang==d.cabang).map(p=>+String(p.id).split("-")[1]||0))+1;
+        d.id=d.cabang+"-"+String(n).padStart(3,"0");d.ts=new Date().toISOString();
+      }
+      try{await post("add",{data:d})}catch(x){$("#res").innerHTML=`<div class="msg err">Gagal: ${e(x.message)}</div>`;return}
+      const real=S.peserta.find(p=>p.nisn==d.nisn&&p.cabang==d.cabang)||d;
+      $("#res").innerHTML=`<div class="msg">✔ Pendaftaran berhasil. No. peserta: <b>${real.id}</b> <button type="button" class="btn o sm" onclick="bukti('${real.id}')">Cetak Bukti</button></div>`;
+      f.reset();
+    });
   };
 }
 /* ===== PESERTA ===== */
@@ -158,10 +184,11 @@ function xl(){
 }
 /* ===== CEK NILAI ===== */
 function cek(){
-  $("#app").innerHTML=`<div class="card"><h2>Cek Nilai</h2><div class="row"><input id="cn" placeholder="Masukkan NISN" style="max-width:260px" inputmode="numeric"><button class="btn" onclick="cari()">Cek</button></div><div id="cr"></div></div>`;
+  $("#app").innerHTML=`<div class="card"><h2>Cek Nilai</h2><div class="row"><input id="cn" placeholder="Masukkan NISN" style="max-width:260px" inputmode="numeric"><button class="btn" onclick="cari(this)">Cek</button></div><div id="cr"></div></div>`;
 }
-async function cari(){
-  await load();const q=$("#cn").value.trim();
+function cari(btn){return run(btn,"Mencari…",async()=>{$("#cr").innerHTML=WAIT("Sedang mencari data, mohon tunggu…");await cari_()})}
+async function cari_(){
+  await load("Mengambil nilai…");const q=$("#cn").value.trim();
   if(!S.publish){$("#cr").innerHTML=`<div class="msg err">Nilai belum dipublikasikan oleh panitia.</div>`;return}
   const l=S.peserta.filter(p=>p.nisn==q);
   if(!l.length){$("#cr").innerHTML=`<div class="msg err">NISN tidak ditemukan.</div>`;return}
@@ -177,45 +204,58 @@ async function cari(){
 /* ===== ADMIN ===== */
 function admin(){
   if(!isAdmin){
-    $("#app").innerHTML=`<div class="card" style="max-width:360px"><h2>Login Admin</h2><label>Password</label><input type="password" id="pw"><div class="row"><button class="btn" onclick="login()">Masuk</button></div><div id="le"></div></div>`;return;
+    $("#app").innerHTML=`<div class="card" style="max-width:360px"><h2>Login Admin</h2><label>Password</label><input type="password" id="pw" onkeydown="if(event.key=='Enter')login($('#lb'))"><div class="row"><button class="btn" id="lb" onclick="login(this)">Masuk</button></div><div id="le"></div></div>`;return;
   }
-  const T=[["data","Data Peserta"],["hadir","Daftar Hadir"],["form","Form Penilaian"],["nilai","Input Nilai"],["juara","Juara"],["info","Info Beranda"]];
+  const T=[["data","Data Peserta"],["hadir","Daftar Hadir"],["form","Form Penilaian"],["nilai","Input Nilai"],["rekap","Rekap Nilai"],["juara","Juara"],["info","Info Beranda"]];
   $("#app").innerHTML=`<div class="row">${T.map(([k,v])=>`<button class="btn ${atab==k?"":"s"}" onclick="atab='${k}';admin()">${v}</button>`).join("")}<button class="btn s" style="margin-left:auto" onclick="isAdmin=false;pw='';admin()">Keluar</button></div><div class="card" id="at"></div>`;
-  ({data:tData,hadir:tHadir,form:tForm,nilai:tNilai,juara:tJuara,info:tInfo})[atab]();
+  ({data:tData,hadir:tHadir,form:tForm,nilai:tNilai,rekap:tRekap,juara:tJuara,info:tInfo})[atab]();
 }
-async function login(){
+function login(btn){
   const v=$("#pw").value;
-  if(api){try{const r=await (await fetch(CONFIG.API_URL,{method:"POST",body:JSON.stringify({action:"auth",pw:v})})).json();if(r.error)throw 0}catch(x){$("#le").innerHTML=`<div class="msg err">Password salah.</div>`;return}}
-  else if(v!=CONFIG.ADMIN_PW){$("#le").innerHTML=`<div class="msg err">Password salah.</div>`;return}
-  pw=v;isAdmin=true;await load();admin();
+  return run(btn,"Memeriksa…",async()=>{
+    $("#le").innerHTML=WAIT("Sedang memeriksa password, mohon tunggu…");busyStart("Memeriksa password…");
+    try{
+      if(api){
+        const r=await (await fetch(CONFIG.API_URL,{method:"POST",body:JSON.stringify({action:"auth",pw:v})})).json();
+        if(r.error)throw new Error("PW");
+        S=Object.assign(S,r);try{localStorage.setItem(CK,JSON.stringify(S))}catch(x){}
+      }else if(v!=CONFIG.ADMIN_PW)throw new Error("PW");
+      pw=v;isAdmin=true;busyEnd("✔ Berhasil masuk");admin();
+    }catch(x){
+      busyEnd();
+      $("#le").innerHTML=`<div class="msg err">${x.message=="PW"?"Password salah.":"Gagal terhubung ke server. Periksa koneksi lalu coba lagi."}</div>`;
+    }
+  });
 }
 const cabSel=()=>`<select id="ac" style="max-width:260px">${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>`;
 const pl=c=>S.peserta.filter(p=>p.cabang==c);
 function tData(){
   $("#at").innerHTML=`<h3>Data Peserta</h3><div class="row"><select id="dc" style="max-width:260px"><option value="">Semua cabang</option>${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>
-  <button class="btn s" onclick="load().then(dTab)">Muat ulang</button></div><div id="ed"></div><div class="wrap" id="dt"></div>`;
+  <button class="btn s" onclick="run(this,'Memuat…',()=>load('Memuat ulang data…').then(dTab))">Muat ulang</button></div><div id="ed"></div><div class="wrap" id="dt"></div>`;
   $("#dc").onchange=dTab;dTab();
 }
 function dTab(){
   const v=$("#dc").value,l=S.peserta.filter(p=>!v||p.cabang==v);
   $("#dt").innerHTML=l.length?`<table><tr><th>No</th><th>No. Peserta</th><th>Nama</th><th>Cabang</th><th>NISN</th><th>Kelas</th><th>Sekolah</th><th>Gugus</th><th>Pendamping</th><th>Aksi</th></tr>
   ${l.map((p,i)=>`<tr><td>${i+1}</td><td>${p.id}</td><td>${e(p.nama)}</td><td>${CAB[p.cabang]?.n||p.cabang}</td><td>${e(p.nisn)}</td><td>${e(p.kelas)}</td><td>${e(p.sekolah)}</td><td>${e(p.gugus)}</td><td>${e(p.guru)}</td>
-  <td style="white-space:nowrap"><button class="btn sm" onclick="editP('${p.id}')">Edit</button> <button class="btn sm" style="background:#a63d2f" onclick="delP('${p.id}')">Hapus</button></td></tr>`).join("")}</table>`:"<p>Belum ada peserta.</p>";
+  <td style="white-space:nowrap"><button class="btn sm" onclick="editP('${p.id}')">Edit</button> <button class="btn sm" style="background:#a63d2f" onclick="delP('${p.id}',this)">Hapus</button></td></tr>`).join("")}</table>`:"<p>Belum ada peserta.</p>";
 }
 function editP(id){
   const p=S.peserta.find(x=>x.id==id);if(!p)return;
   $("#ed").innerHTML=`<div class="card" style="border-color:var(--o)"><h3>Edit Peserta ${p.id}</h3><form id="ef" onsubmit="return false">${F(p)}
   <p style="font-size:13px">Cabang: <b>${CAB[p.cabang].n}</b>. Untuk memindahkan cabang, hapus lalu daftarkan ulang.</p>
-  <div class="row"><button class="btn" onclick="saveP('${id}')">Simpan Perubahan</button><button class="btn s" onclick="$('#ed').innerHTML=''">Batal</button><span id="es"></span></div></form></div>`;
+  <div class="row"><button class="btn" onclick="saveP('${id}',this)">Simpan Perubahan</button><button class="btn s" onclick="$('#ed').innerHTML=''">Batal</button><span id="es"></span></div></form></div>`;
   $("#ed").scrollIntoView({behavior:"smooth"});
 }
-async function saveP(id){
+function saveP(id,btn){return run(btn,"Menyimpan…",async()=>{$("#es").innerHTML=' ⏳ Sedang menyimpan…';await saveP_(id)})}
+async function saveP_(id){
   const f=$("#ef");if(!f.reportValidity())return;
   const d=Object.fromEntries(new FormData(f)),p=S.peserta.find(x=>x.id==id);
   if(S.peserta.some(x=>x.id!=id&&x.nisn==d.nisn&&x.cabang==p.cabang)){$("#es").innerHTML=" NISN sudah dipakai peserta lain di cabang ini.";return}
   try{await post("update",{id,data:d});$("#ed").innerHTML="";dTab()}catch(x){$("#es").innerHTML=" Gagal: "+e(x.message)}
 }
-async function delP(id){
+function delP(id,btn){return run(btn,"Menghapus…",()=>delP_(id))}
+async function delP_(id){
   const p=S.peserta.find(x=>x.id==id);
   if(!confirm(`Hapus peserta ${p.id} - ${p.nama}?\nNilai peserta ini juga ikut terhapus.`))return;
   try{await post("delete",{id});dTab()}catch(x){alert("Gagal: "+x.message)}
@@ -240,19 +280,20 @@ function pForm(){
 }
 function tNilai(){
   $("#at").innerHTML=`<h3>Input Nilai</h3><div class="row">${cabSel()}<label style="margin:0;font-weight:400"><input type="checkbox" id="pub" style="width:auto" ${S.publish?"checked":""}> Publikasikan nilai di Cek Nilai</label></div><div id="nt"></div>`;
-  $("#ac").onchange=nTab;$("#pub").onchange=async()=>{await post("save",{publish:$("#pub").checked})};nTab();
+  $("#ac").onchange=nTab;$("#pub").onchange=async()=>{const c=$("#pub");c.disabled=true;try{await post("save",{publish:c.checked})}catch(x){c.checked=!c.checked}finally{c.disabled=false}};nTab();
 }
 function nTab(){
   const c=$("#ac").value,C=CAB[c],l=pl(c);
   $("#nt").innerHTML=l.length?`<div class="wrap"><table><tr><th>No. Peserta</th><th>Nama</th>${C.i.map(([n,w])=>`<th>${n} (${w}%)</th>`).join("")}<th>Total</th></tr>
   ${l.map(p=>`<tr data-id="${p.id}"><td>${p.id}</td><td>${e(p.nama)}</td>${C.i.map((_,k)=>`<td><input class="sc" type="number" min="0" max="100" step="0.1" data-k="${k}" value="${S.nilai[p.id]?.[k]??""}" oninput="hit(this)"></td>`).join("")}<td class="tt"><b>${scored(c,p.id)?total(c,p.id).toFixed(2):"-"}</b></td></tr>`).join("")}</table></div>
-  <div class="row"><button class="btn" onclick="simpanNilai()">Simpan Nilai</button><span id="ns"></span></div>`:"<p>Belum ada peserta pada cabang ini.</p>";
+  <div class="row"><button class="btn" onclick="simpanNilai(this)">Simpan Nilai</button><span id="ns"></span></div>`:"<p>Belum ada peserta pada cabang ini.</p>";
 }
 function hit(el){
   const tr=el.closest("tr"),C=CAB[$("#ac").value];
   const t=[...tr.querySelectorAll(".sc")].reduce((a,i,k)=>a+(+i.value||0)*C.i[k][1]/100,0);tr.querySelector(".tt").innerHTML=`<b>${t.toFixed(2)}</b>`;
 }
-async function simpanNilai(){
+function simpanNilai(btn){return run(btn,"Menyimpan…",async()=>{$("#ns").innerHTML=' ⏳ Sedang menyimpan…';await simpanNilai_()})}
+async function simpanNilai_(){
   const nilai={...S.nilai};
   document.querySelectorAll("#nt tr[data-id]").forEach(tr=>{
     const o={};tr.querySelectorAll(".sc").forEach(i=>{if(i.value!=="")o[i.dataset.k]=Math.min(100,Math.max(0,+i.value))});
@@ -275,27 +316,65 @@ function tInfo(){
   <label>PDF dari Google Drive (satu per baris: <code>Judul | link berbagi</code>)</label>
   <textarea id="ip" rows="4" placeholder="Pedoman Umum | https://drive.google.com/file/d/XXXX/view">${(S.info.pdfs||[]).map(p=>p.judul+" | https://drive.google.com/file/d/"+p.id+"/view").join("\n")}</textarea>
   <p style="font-size:13px">File di Drive harus dibagikan "Siapa saja yang memiliki link".</p>
-  <div class="row"><button class="btn" onclick="simpanInfo()">Simpan</button><span id="is"></span></div>`;
+  <div class="row"><button class="btn" onclick="simpanInfo(this)">Simpan</button><span id="is"></span></div>`;
 }
 const driveId=v=>{v=String(v||"").trim();const m=v.match(/\/d\/([-\w]{10,})/)||v.match(/[?&]id=([-\w]{10,})/)||v.match(/^([-\w]{20,})$/);return m?m[1]:""};
-async function simpanInfo(){
+function simpanInfo(btn){return run(btn,"Menyimpan…",simpanInfo_)}
+async function simpanInfo_(){
   const pdfs=[],bad=[];
   $("#ip").value.split("\n").map(l=>l.trim()).filter(Boolean).forEach((l,i)=>{
     const k=l.indexOf("|"),id=k<0?"":driveId(l.slice(k+1));
     if(!id)bad.push(i+1);else pdfs.push({judul:l.slice(0,k).trim()||"Dokumen "+(pdfs.length+1),id});
   });
   if(bad.length){$("#is").innerHTML=" Gagal: baris "+bad.join(", ")+" tidak valid (format: Judul | link berbagi)";return}
-  $("#is").innerHTML=" Menyimpan…";
+  $("#is").innerHTML=" ⏳ Sedang menyimpan…";
   try{
     await post("save",{info:{teks:$("#it").value,pdfs}});
     if(api&&(S.info.pdfs||[]).length!=pdfs.length)throw new Error("PDF tidak tersimpan di Sheet. Pastikan Code.gs versi terbaru sudah di-deploy (New version).");
     $("#is").innerHTML=" ✔ Tersimpan";
   }catch(x){$("#is").innerHTML=" Gagal: "+e(x.message)}
 }
+/* ===== REKAP NILAI ===== */
+function rekapData(c){
+  const C=CAB[c],r=ranking(c),un=pl(c).filter(p=>!scored(c,p.id));
+  const val=(p,k)=>S.nilai[p.id]?.[k]!==undefined?+S.nilai[p.id][k]:"";
+  return {C,r,un,val};
+}
+function rekapTbl(c){
+  const {C,r,un,val}=rekapData(c),n=pl(c).length;
+  const row=(p,rk)=>`<tr><td class="${rk!="-"&&rk<=3?"medal":""}">${rk}</td><td>${p.id}</td><td>${e(p.nama)}</td><td>${e(p.sekolah)}</td><td>${e(p.gugus)}</td>${C.i.map((_,k)=>`<td>${val(p,k)===""?"-":val(p,k)}</td>`).join("")}<td><b>${rk=="-"?"-":p.tot.toFixed(2)}</b></td></tr>`;
+  const st=r.length?` · Tertinggi: ${r[0].tot.toFixed(2)} · Terendah: ${r[r.length-1].tot.toFixed(2)} · Rata-rata: ${(r.reduce((a,p)=>a+p.tot,0)/r.length).toFixed(2)}`:"";
+  return `<h4>${C.n}</h4><p style="font-size:13px;margin:2px 0 6px">Peserta: ${n} · Sudah dinilai: ${r.length} · Belum dinilai: ${un.length}${st}</p>`+(n?`<div class="wrap"><table><tr><th>Peringkat</th><th>No. Peserta</th><th>Nama</th><th>Sekolah</th><th>Gugus</th>${C.i.map(([t,w])=>`<th>${t}<br>(${w}%)</th>`).join("")}<th>Total</th></tr>${r.map(p=>row(p,p.rank)).join("")}${un.map(p=>row(p,"-")).join("")}</table></div>`:"<p>Belum ada peserta.</p>");
+}
+const rkList=()=>$("#rc").value?[$("#rc").value]:Object.keys(CAB);
+function drawRekap(){$("#rk").innerHTML=rkList().map(rekapTbl).join("")}
+function tRekap(){
+  $("#at").innerHTML=`<h3>Rekap Nilai</h3><div class="row"><select id="rc" style="max-width:260px"><option value="">Semua cabang</option>${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>
+  <button class="btn o" onclick="pRekap()">Cetak</button><button class="btn s" onclick="xRekap()">Unduh Excel</button>
+  <button class="btn s" onclick="run(this,'Memuat…',()=>load('Memuat ulang data…').then(drawRekap))">Muat ulang</button></div>
+  <p style="font-size:13px">Nilai indikator skala 0–100; Total = jumlah (nilai × bobot). Peringkat hanya untuk peserta yang sudah dinilai.</p><div id="rk"></div>`;
+  $("#rc").onchange=drawRekap;drawRekap();
+}
+function pRekap(){
+  const l=rkList();
+  printHTML(kop("REKAP NILAI"+(l.length==1?"<br>Lomba "+CAB[l[0]].n:""))+l.map((c,i)=>`<div ${i<l.length-1?'class="pg"':""}>${rekapTbl(c)}</div>`).join(""));
+}
+function xRekap(){
+  const wb=XLSX.utils.book_new();
+  rkList().forEach(c=>{
+    const {C,r,un,val}=rekapData(c);
+    const rows=[...r.map(p=>[p.rank,p]),...un.map(p=>["-",p])].map(([rk,p])=>{
+      const o={Peringkat:rk,"No. Peserta":p.id,"Nama Siswa":p.nama,"Asal Sekolah":p.sekolah,"Asal Gugus":p.gugus};
+      C.i.forEach(([n,w],k)=>o[`${n} (${w}%)`]=val(p,k));o.Total=rk=="-"?"":+p.tot.toFixed(2);return o;
+    });
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows.length?rows:[{}]),C.n.slice(0,31));
+  });
+  XLSX.writeFile(wb,"rekap_nilai_FTBI_2026.xlsx");
+}
 /* ===== START ===== */
 nav();
 if(api){try{const c=JSON.parse(localStorage.getItem(CK));if(c){S=Object.assign(S,c);render()}else $("#app").innerHTML='<div class="card">Memuat data…</div>'}catch(x){}}
-load().then(()=>{if(!isAdmin||view!="admin")render()});
+load("Memperbarui data…").then(()=>{if(!isAdmin||view!="admin")render()});
 </script>
 </body>
 </html>
