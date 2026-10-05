@@ -47,7 +47,7 @@ iframe{width:100%;height:560px;border:1px solid var(--l);border-radius:8px}
 <script>
 /* ===== KONFIGURASI ===== */
 const CONFIG = {
-  API_URL: "https://script.google.com/macros/s/AKfycbwSkfXv57lTAFSeXFvDQopIByT4_KkeBfqiW2Db-WXfP-u-ymWDsrJxOuvEEUgumaGj/exec",          // isi URL Web App Google Apps Script (lihat Code.gs). Kosong = mode demo (data di browser ini saja)
+  API_URL: "https://script.google.com/macros/s/AKfycbwsCt3lYQ-wlok1kyUpfeLcJ5EwsdzejRsn7_BW2K7WTXCdowfamlOGhiCjfgKwxY4V/exec",          // isi URL Web App Google Apps Script (lihat Code.gs). Kosong = mode demo (data di browser ini saja)
   ADMIN_PW: "admin123", // password admin (mode demo). Pada mode API, password dicek di Code.gs
   EVENT: "Senin, 26 Oktober 2026 · SDN 3 Pasir Panjang"
 };
@@ -61,7 +61,7 @@ const CAB = {
 };
 /* ===== DATA ===== */
 let S={peserta:[],nilai:{},info:{teks:"Selamat datang di pendaftaran FTBI Tingkat Kecamatan Arut Selatan 2026.\nPeserta tiap cabang adalah juara 1 dan 2 dari masing-masing gugus.",pdfs:[]},publish:false};
-let pw="",isAdmin=false,view="home",atab="hadir";
+let pw="",isAdmin=false,view="home",atab="data";
 const $=s=>document.querySelector(s), e=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const api=!!CONFIG.API_URL;
 async function load(){
@@ -76,6 +76,8 @@ async function post(action,payload){
     if(r.error)throw new Error(r.error);S=Object.assign(S,r);return;
   }
   if(action=="add")S.peserta.push(payload.data);
+  else if(action=="update")S.peserta=S.peserta.map(p=>p.id==payload.id?{...p,...payload.data}:p);
+  else if(action=="delete"){S.peserta=S.peserta.filter(p=>p.id!=payload.id);delete S.nilai[payload.id]}
   else Object.assign(S,payload); 
   try{localStorage.setItem("ftbi",JSON.stringify(S))}catch(x){}
 }
@@ -110,28 +112,30 @@ function home(){
   ${pdfs.map(p=>`<div class="card"><h3>${e(p.judul)}</h3><iframe src="https://drive.google.com/file/d/${e(p.id)}/preview" allow="autoplay"></iframe></div>`).join("")}`;
 }
 /* ===== PENDAFTARAN ===== */
+const F=(p={})=>`<div class="grid">
+  <div><label>Nama Siswa</label><input name="nama" required value="${e(p.nama)}"></div>
+  <div><label>NISN (10 digit)</label><input name="nisn" required pattern="\\d{10}" inputmode="numeric" maxlength="10" value="${e(p.nisn)}"></div>
+  <div><label>Tempat Lahir</label><input name="tempat" required value="${e(p.tempat)}"></div>
+  <div><label>Tanggal Lahir</label><input type="date" name="tgl" required value="${e(p.tgl)}"></div>
+  <div><label>Kelas</label><select name="kelas">${[1,2,3,4,5,6].map(k=>`<option ${p.kelas==k?"selected":""}>${k}</option>`).join("")}</select></div>
+  <div><label>Asal Sekolah</label><input name="sekolah" required value="${e(p.sekolah)}"></div>
+  <div><label>Asal Gugus</label><input name="gugus" required value="${e(p.gugus)}"></div>
+  <div><label>Guru Pendamping</label><input name="guru" required value="${e(p.guru)}"></div></div>`;
 function daftar(){
   $("#app").innerHTML=`<div class="card"><h2>Form Pendaftaran</h2><form id="f" onsubmit="return false">
   <label>Cabang Lomba</label><select name="cabang" required>${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>
-  <div class="grid">
-  <div><label>Nama Siswa</label><input name="nama" required></div>
-  <div><label>NISN (10 digit)</label><input name="nisn" required pattern="\\d{10}" inputmode="numeric" maxlength="10"></div>
-  <div><label>Tempat Lahir</label><input name="tempat" required></div>
-  <div><label>Tanggal Lahir</label><input type="date" name="tgl" required></div>
-  <div><label>Kelas</label><select name="kelas">${[1,2,3,4,5,6].map(k=>`<option>${k}</option>`).join("")}</select></div>
-  <div><label>Asal Sekolah</label><input name="sekolah" required></div>
-  <div><label>Asal Gugus</label><input name="gugus" required></div>
-  <div><label>Guru Pendamping</label><input name="guru" required></div></div>
+  ${F()}
   <div class="row"><button class="btn" id="sb">Daftar</button></div><div id="res"></div></form></div>`;
   $("#sb").onclick=async()=>{
     const f=$("#f");if(!f.reportValidity())return;
     const d=Object.fromEntries(new FormData(f));
     await load();
     if(S.peserta.some(p=>p.nisn==d.nisn&&p.cabang==d.cabang)){$("#res").innerHTML=`<div class="msg err">NISN ini sudah terdaftar pada cabang tersebut.</div>`;return}
-    const n=S.peserta.filter(p=>p.cabang==d.cabang).length+1;
-    d.id=d.cabang+"-"+String(n).padStart(3,"0");d.ts=Date.now();
+    const n=Math.max(0,...S.peserta.filter(p=>p.cabang==d.cabang).map(p=>+String(p.id).split("-")[1]||0))+1;
+    d.id=d.cabang+"-"+String(n).padStart(3,"0");d.ts=new Date().toISOString();
     try{await post("add",{data:d})}catch(x){$("#res").innerHTML=`<div class="msg err">Gagal: ${e(x.message)}</div>`;return}
-    $("#res").innerHTML=`<div class="msg">Pendaftaran berhasil. No. peserta: <b>${d.id}</b> <button type="button" class="btn o sm" onclick="bukti('${d.id}')">Cetak Bukti</button></div>`;
+    const real=S.peserta.find(p=>p.nisn==d.nisn&&p.cabang==d.cabang)||d;
+    $("#res").innerHTML=`<div class="msg">Pendaftaran berhasil. No. peserta: <b>${real.id}</b> <button type="button" class="btn o sm" onclick="bukti('${real.id}')">Cetak Bukti</button></div>`;
     f.reset();
   };
 }
@@ -174,9 +178,9 @@ function admin(){
   if(!isAdmin){
     $("#app").innerHTML=`<div class="card" style="max-width:360px"><h2>Login Admin</h2><label>Password</label><input type="password" id="pw"><div class="row"><button class="btn" onclick="login()">Masuk</button></div><div id="le"></div></div>`;return;
   }
-  const T=[["hadir","Daftar Hadir"],["form","Form Penilaian"],["nilai","Input Nilai"],["juara","Juara"],["info","Info Beranda"]];
+  const T=[["data","Data Peserta"],["hadir","Daftar Hadir"],["form","Form Penilaian"],["nilai","Input Nilai"],["juara","Juara"],["info","Info Beranda"]];
   $("#app").innerHTML=`<div class="row">${T.map(([k,v])=>`<button class="btn ${atab==k?"":"s"}" onclick="atab='${k}';admin()">${v}</button>`).join("")}<button class="btn s" style="margin-left:auto" onclick="isAdmin=false;pw='';admin()">Keluar</button></div><div class="card" id="at"></div>`;
-  ({hadir:tHadir,form:tForm,nilai:tNilai,juara:tJuara,info:tInfo})[atab]();
+  ({data:tData,hadir:tHadir,form:tForm,nilai:tNilai,juara:tJuara,info:tInfo})[atab]();
 }
 async function login(){
   const v=$("#pw").value;
@@ -186,6 +190,35 @@ async function login(){
 }
 const cabSel=()=>`<select id="ac" style="max-width:260px">${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>`;
 const pl=c=>S.peserta.filter(p=>p.cabang==c);
+function tData(){
+  $("#at").innerHTML=`<h3>Data Peserta</h3><div class="row"><select id="dc" style="max-width:260px"><option value="">Semua cabang</option>${Object.entries(CAB).map(([k,c])=>`<option value="${k}">${c.n}</option>`).join("")}</select>
+  <button class="btn s" onclick="load().then(dTab)">Muat ulang</button></div><div id="ed"></div><div class="wrap" id="dt"></div>`;
+  $("#dc").onchange=dTab;dTab();
+}
+function dTab(){
+  const v=$("#dc").value,l=S.peserta.filter(p=>!v||p.cabang==v);
+  $("#dt").innerHTML=l.length?`<table><tr><th>No</th><th>No. Peserta</th><th>Nama</th><th>Cabang</th><th>NISN</th><th>Kelas</th><th>Sekolah</th><th>Gugus</th><th>Pendamping</th><th>Aksi</th></tr>
+  ${l.map((p,i)=>`<tr><td>${i+1}</td><td>${p.id}</td><td>${e(p.nama)}</td><td>${CAB[p.cabang]?.n||p.cabang}</td><td>${e(p.nisn)}</td><td>${e(p.kelas)}</td><td>${e(p.sekolah)}</td><td>${e(p.gugus)}</td><td>${e(p.guru)}</td>
+  <td style="white-space:nowrap"><button class="btn sm" onclick="editP('${p.id}')">Edit</button> <button class="btn sm" style="background:#a63d2f" onclick="delP('${p.id}')">Hapus</button></td></tr>`).join("")}</table>`:"<p>Belum ada peserta.</p>";
+}
+function editP(id){
+  const p=S.peserta.find(x=>x.id==id);if(!p)return;
+  $("#ed").innerHTML=`<div class="card" style="border-color:var(--o)"><h3>Edit Peserta ${p.id}</h3><form id="ef" onsubmit="return false">${F(p)}
+  <p style="font-size:13px">Cabang: <b>${CAB[p.cabang].n}</b>. Untuk memindahkan cabang, hapus lalu daftarkan ulang.</p>
+  <div class="row"><button class="btn" onclick="saveP('${id}')">Simpan Perubahan</button><button class="btn s" onclick="$('#ed').innerHTML=''">Batal</button><span id="es"></span></div></form></div>`;
+  $("#ed").scrollIntoView({behavior:"smooth"});
+}
+async function saveP(id){
+  const f=$("#ef");if(!f.reportValidity())return;
+  const d=Object.fromEntries(new FormData(f)),p=S.peserta.find(x=>x.id==id);
+  if(S.peserta.some(x=>x.id!=id&&x.nisn==d.nisn&&x.cabang==p.cabang)){$("#es").innerHTML=" NISN sudah dipakai peserta lain di cabang ini.";return}
+  try{await post("update",{id,data:d});$("#ed").innerHTML="";dTab()}catch(x){$("#es").innerHTML=" Gagal: "+e(x.message)}
+}
+async function delP(id){
+  const p=S.peserta.find(x=>x.id==id);
+  if(!confirm(`Hapus peserta ${p.id} - ${p.nama}?\nNilai peserta ini juga ikut terhapus.`))return;
+  try{await post("delete",{id});dTab()}catch(x){alert("Gagal: "+x.message)}
+}
 function tHadir(){
   $("#at").innerHTML=`<h3>Daftar Hadir</h3><div class="row">${cabSel()}<button class="btn o" onclick="pHadir()">Cetak</button></div>`;
 }
