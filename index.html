@@ -64,16 +64,17 @@ let S={peserta:[],nilai:{},info:{teks:"Selamat datang di pendaftaran FTBI Tingka
 let pw="",isAdmin=false,view="home",atab="data";
 const $=s=>document.querySelector(s), e=v=>String(v??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const api=!!CONFIG.API_URL;
+const CK="ftbi_cache";
 async function load(){
   try{
-    if(api){S=Object.assign(S,await (await fetch(CONFIG.API_URL)).json())}
+    if(api){S=Object.assign(S,await (await fetch(CONFIG.API_URL)).json());try{localStorage.setItem(CK,JSON.stringify(S))}catch(x){}}
     else{const d=localStorage.getItem("ftbi");if(d)S=JSON.parse(d)}
   }catch(x){console.error(x)}
 }
 async function post(action,payload){
   if(api){
     const r=await (await fetch(CONFIG.API_URL,{method:"POST",body:JSON.stringify({action,pw,...payload})})).json();
-    if(r.error)throw new Error(r.error);S=Object.assign(S,r);return;
+    if(r.error)throw new Error(r.error);S=Object.assign(S,r);try{localStorage.setItem(CK,JSON.stringify(S))}catch(x){}return;
   }
   if(action=="add")S.peserta.push(payload.data);
   else if(action=="update")S.peserta=S.peserta.map(p=>p.id==payload.id?{...p,...payload.data}:p);
@@ -109,7 +110,7 @@ function home(){
   $("#app").innerHTML=`<div class="card"><h2>Informasi</h2><div style="white-space:pre-wrap">${e(S.info.teks)}</div>
   <p><b>Pelaksanaan:</b> ${CONFIG.EVENT}</p></div>
   <div class="card"><h3>Cabang Lomba</h3><ul>${Object.values(CAB).map(c=>`<li>${c.n}</li>`).join("")}</ul></div>
-  ${pdfs.map(p=>`<div class="card"><h3>${e(p.judul)}</h3><iframe src="https://drive.google.com/file/d/${e(p.id)}/preview" allow="autoplay"></iframe></div>`).join("")}`;
+  ${pdfs.map(p=>`<div class="card"><h3>${e(p.judul)}</h3><iframe loading="lazy" src="https://drive.google.com/file/d/${e(p.id)}/preview" allow="autoplay"></iframe><p style="font-size:13px"><a href="https://drive.google.com/file/d/${e(p.id)}/view" target="_blank" rel="noopener">Buka di tab baru</a></p></div>`).join("")}`;
 }
 /* ===== PENDAFTARAN ===== */
 const F=(p={})=>`<div class="grid">
@@ -276,12 +277,25 @@ function tInfo(){
   <p style="font-size:13px">File di Drive harus dibagikan "Siapa saja yang memiliki link".</p>
   <div class="row"><button class="btn" onclick="simpanInfo()">Simpan</button><span id="is"></span></div>`;
 }
+const driveId=v=>{v=String(v||"").trim();const m=v.match(/\/d\/([-\w]{10,})/)||v.match(/[?&]id=([-\w]{10,})/)||v.match(/^([-\w]{20,})$/);return m?m[1]:""};
 async function simpanInfo(){
-  const pdfs=$("#ip").value.split("\n").map(l=>l.split("|")).filter(a=>a.length>1).map(a=>({judul:a[0].trim(),id:(a[1].match(/[-\w]{25,}/)||[""])[0]})).filter(p=>p.id);
-  try{await post("save",{info:{teks:$("#it").value,pdfs}});$("#is").innerHTML=" ✔ Tersimpan"}catch(x){$("#is").innerHTML=" Gagal: "+e(x.message)}
+  const pdfs=[],bad=[];
+  $("#ip").value.split("\n").map(l=>l.trim()).filter(Boolean).forEach((l,i)=>{
+    const k=l.indexOf("|"),id=k<0?"":driveId(l.slice(k+1));
+    if(!id)bad.push(i+1);else pdfs.push({judul:l.slice(0,k).trim()||"Dokumen "+(pdfs.length+1),id});
+  });
+  if(bad.length){$("#is").innerHTML=" Gagal: baris "+bad.join(", ")+" tidak valid (format: Judul | link berbagi)";return}
+  $("#is").innerHTML=" Menyimpan…";
+  try{
+    await post("save",{info:{teks:$("#it").value,pdfs}});
+    if(api&&(S.info.pdfs||[]).length!=pdfs.length)throw new Error("PDF tidak tersimpan di Sheet. Pastikan Code.gs versi terbaru sudah di-deploy (New version).");
+    $("#is").innerHTML=" ✔ Tersimpan";
+  }catch(x){$("#is").innerHTML=" Gagal: "+e(x.message)}
 }
 /* ===== START ===== */
-nav();load().then(render);
+nav();
+if(api){try{const c=JSON.parse(localStorage.getItem(CK));if(c){S=Object.assign(S,c);render()}else $("#app").innerHTML='<div class="card">Memuat data…</div>'}catch(x){}}
+load().then(()=>{if(!isAdmin||view!="admin")render()});
 </script>
 </body>
 </html>
