@@ -39,17 +39,35 @@ button:disabled{opacity:.7;cursor:wait}
 #toast{position:fixed;left:50%;bottom:20px;transform:translate(-50%,20px);background:#26302b;color:#fff;padding:10px 18px;border-radius:24px;box-shadow:0 4px 14px #0004;opacity:0;pointer-events:none;transition:.2s;z-index:99;font-size:14px;max-width:90vw}
 #toast.show{opacity:1;transform:translate(-50%,0)}#toast.ok{background:var(--g2)}#toast.err{background:#a63d2f}
 @media print{#toast{display:none!important}}
+/* dashboard: run text & infografis */
+.runbar{background:#0003;margin:12px -20px 0;overflow:hidden;white-space:nowrap;padding:7px 0;font-size:14px}
+.runbar span{display:inline-block;padding-left:100%;animation:run 25s linear infinite}
+.runbar:hover span{animation-play-state:paused}
+@keyframes run{to{transform:translateX(-100%)}}
+@media (prefers-reduced-motion:reduce){.runbar{white-space:normal;padding:7px 20px}.runbar span{animation:none;padding-left:0}}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--c);border:1px solid var(--l);border-left:5px solid var(--o);border-radius:10px;padding:12px 16px}
+.stat b{display:block;font:800 1.9rem/1.1 Fraunces,Georgia,serif;color:var(--g)}.stat small{opacity:.75}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:16px}
+.charts .card{margin:0}.charts h3{margin-bottom:10px}
+.cbox{max-height:380px;overflow-y:auto;padding-right:4px}
+.br{display:grid;grid-template-columns:130px 1fr 34px;gap:8px;align-items:center;margin:6px 0;font-size:13px}
+.bl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bt{background:#ece4d0;border-radius:6px;height:16px;overflow:hidden}
+.bt i{display:block;height:100%;border-radius:6px;transition:width .5s}
+.br b{text-align:right}
 </style>
 </head>
 <body>
 <header>
   <h1>Festival Tunas Bahasa Ibu 2026</h1>
   <small>Tingkat Kecamatan Arut Selatan · Bahasa Melayu Dialek Kotawaringin</small>
+  <div id="run" class="runbar hide" aria-live="off"></div>
   <nav id="nav"></nav>
 </header>
 <main id="app"></main>
 <div id="pa"></div>
-<div class="noprint" style="text-align:center;font-size:12px;opacity:.55;padding:0 0 14px">Versi 4 · 9 Okt 2026</div>
+<div class="noprint" style="text-align:center;font-size:12px;opacity:.55;padding:0 0 14px">Versi 5 · 9 Okt 2026</div>
 <div id="toast"></div>
 
 <script>
@@ -156,11 +174,47 @@ function bukti(id){
 const MENU=[["home","Beranda"],["daftar","Pendaftaran"],["peserta","Daftar Peserta"],["cek","Cek Nilai"],["admin","Admin"]];
 function nav(){$("#nav").innerHTML=MENU.map(([k,v])=>`<button class="${view==k?"on":""}" onclick="go('${k}')">${v}</button>`).join("")}
 function go(v){view=v;nav();render()}
-function render(){({home,daftar,peserta,cek,admin})[view]()}
+function render(){runBar();({home,daftar,peserta,cek,admin})[view]()}
+/* Run text: disimpan di akhir field info.teks sebagai penanda [[RUN:...]] agar kompatibel dengan Code.gs yang sudah ada */
+const RUNRE=/\n*\[\[RUN:([\s\S]*?)\]\]\s*$/;
+const infoTeks=()=>String(S.info.teks||"").replace(RUNRE,"");
+const infoRun=()=>{const m=String(S.info.teks||"").match(RUNRE);return m?m[1].trim():"Selamat datang di pendaftaran FTBI Tingkat Kecamatan Arut Selatan 2026 · "+CONFIG.EVENT};
+function runBar(){
+  const b=$("#run"),t=view=="home"?infoRun():"";
+  if(!t){b.className="runbar hide";b.innerHTML="";return}
+  b.className="runbar";
+  if(b.dataset.t!=t){b.dataset.t=t;b.innerHTML=`<span style="animation-duration:${Math.max(15,Math.round(t.length*.22))}s">${e(t)}</span>`}
+}
+/* ===== INFOGRAFIS ===== */
+function tally(keyFn,labelFn){
+  const m=new Map();
+  S.peserta.forEach(p=>{const k=keyFn(p);if(!k)return;const o=m.get(k)||{l:labelFn(p),n:0};o.n++;m.set(k,o)});
+  return m;
+}
+function bars(items,color){
+  const mx=Math.max(1,...items.map(i=>i[1]));
+  return items.map(([l,n])=>`<div class="br"><span class="bl" title="${e(l)}">${e(l)}</span><div class="bt"><i style="width:${n/mx*100}%;background:${color}"></i></div><b>${n}</b></div>`).join("");
+}
+function infografis(){
+  const N=S.peserta.length;
+  const cab=Object.entries(CAB).map(([k,c])=>[c.n,S.peserta.filter(p=>p.cabang==k).length]);
+  const gm=tally(p=>String(p.gugus||"").trim().toLowerCase().replace(/\s+/g," "),p=>String(p.gugus).trim().replace(/\s+/g," "));
+  const gug=[...gm.values()].map(o=>[o.l,o.n]).sort((a,b)=>a[0].localeCompare(b[0],"id",{numeric:true}));
+  const sek=tally(p=>String(p.sekolah||"").trim().toLowerCase(),p=>p.sekolah).size;
+  return `<div class="stats">
+    <div class="stat"><b>${N}</b><small>Total pendaftar</small></div>
+    <div class="stat"><b>${gug.length}</b><small>Gugus berpartisipasi</small></div>
+    <div class="stat"><b>${sek}</b><small>Sekolah berpartisipasi</small></div>
+    <div class="stat"><b>${Object.keys(CAB).length}</b><small>Cabang lomba</small></div></div>
+  <div class="charts">
+    <div class="card"><h3>Pendaftar per Cabang Lomba</h3>${N?`<div class="cbox">${bars(cab,"var(--g2)")}</div>`:"<p>Belum ada pendaftar.</p>"}</div>
+    <div class="card"><h3>Pendaftar per Gugus</h3>${gug.length?`<div class="cbox">${bars(gug,"var(--o)")}</div>`:"<p>Belum ada pendaftar.</p>"}</div>
+  </div>`;
+}
 /* ===== BERANDA ===== */
 function home(){
   const pdfs=S.info.pdfs||[];
-  $("#app").innerHTML=`<div class="card"><h2>Informasi</h2><div style="white-space:pre-wrap">${e(S.info.teks)}</div>
+  $("#app").innerHTML=infografis()+`<div class="card"><h2>Informasi</h2><div style="white-space:pre-wrap">${e(infoTeks())}</div>
   <p><b>Pelaksanaan:</b> ${CONFIG.EVENT}</p></div>
   <div class="card"><h3>Cabang Lomba</h3><ul>${Object.values(CAB).map(c=>`<li>${c.n}</li>`).join("")}</ul></div>
   ${pdfs.map(p=>`<div class="card"><h3>${e(p.judul)}</h3><iframe loading="lazy" src="https://drive.google.com/file/d/${e(p.id)}/preview" allow="autoplay"></iframe><p style="font-size:13px"><a href="https://drive.google.com/file/d/${e(p.id)}/view" target="_blank" rel="noopener">Buka di tab baru</a></p></div>`).join("")}`;
@@ -358,7 +412,8 @@ function juaraHTML(){
 }
 function pJuara(){printHTML(kop("DAFTAR JUARA")+juaraHTML())}
 function tInfo(){
-  $("#at").innerHTML=`<h3>Info Beranda</h3><label>Teks informasi</label><textarea id="it" rows="6">${e(S.info.teks)}</textarea>
+  $("#at").innerHTML=`<h3>Info Beranda</h3><label>Teks berjalan (run text) di header beranda — kosongkan untuk menyembunyikan</label><input id="ir" maxlength="300" placeholder="Contoh: Pendaftaran ditutup 12 Oktober 2026 pukul 23.59 WITA" value="${e(infoRun())}">
+  <label>Teks informasi</label><textarea id="it" rows="6">${e(infoTeks())}</textarea>
   <label>PDF dari Google Drive (satu per baris: <code>Judul | link berbagi</code>)</label>
   <textarea id="ip" rows="4" placeholder="Pedoman Umum | https://drive.google.com/file/d/XXXX/view">${(S.info.pdfs||[]).map(p=>p.judul+" | https://drive.google.com/file/d/"+p.id+"/view").join("\n")}</textarea>
   <p style="font-size:13px">File di Drive harus dibagikan "Siapa saja yang memiliki link".</p>
@@ -375,7 +430,9 @@ async function simpanInfo_(){
   if(bad.length){$("#is").innerHTML=" Gagal: baris "+bad.join(", ")+" tidak valid (format: Judul | link berbagi)";return}
   $("#is").innerHTML=" ⏳ Sedang menyimpan…";
   try{
-    await post("save",{info:{teks:$("#it").value,pdfs}});
+    const run=$("#ir").value.replace(/\s+/g," ").replace(/\]\]/g,"] ]").trim();
+    await post("save",{info:{teks:$("#it").value.replace(RUNRE,"").trimEnd()+"\n\n[[RUN:"+run+"]]",pdfs}});
+    runBar();
     if(api&&(S.info.pdfs||[]).length!=pdfs.length)throw new Error("PDF tidak tersimpan di Sheet. Pastikan Code.gs versi terbaru sudah di-deploy (New version).");
     $("#is").innerHTML=" ✔ Tersimpan";
   }catch(x){$("#is").innerHTML=" Gagal: "+e(x.message)}
